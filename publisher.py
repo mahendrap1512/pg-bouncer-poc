@@ -1,5 +1,6 @@
 import redis
 import random
+import time
 
 try:
     redis_client = redis.StrictRedis(host='localhost', port=6390, db=0)
@@ -15,4 +16,4 @@ while True:
     redis_client.publish(channel_name, f'topic{randint}')
     if randint == 10:
         break
-
+    time.sleep(1)

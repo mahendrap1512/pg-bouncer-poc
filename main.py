@@ -5,8 +5,7 @@ from db import Task, SessionLocal, engine
 from constants import TaskStatus
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
-from redis_manager import redis_client
-import asyncio
+from redis_manager import get_redis_client
 
 
 app = FastAPI()
@@ -66,38 +65,40 @@ async def new_tasks():
 
 
 
-
 @app.get('/stream/{id}/')
 async def message_stream(request: Request, id: int):
     async def event_generator():
-        STREAM_DELAY = 0.1  # second
         NON_RESPONSE_WAIT_TIME = 10  # seconds
-        last_event_time = datetime.now()
         channel_name = "share"
-        pubsub = redis_client.pubsub()
-        pubsub.subscribe(channel_name)
+        pubsub = get_redis_client().pubsub()
+        # Need is_init, since at the time of API call if there were no message in past 10 seconds, it will go to the else part
+        # we are only interested in, if post calling this API, if there is no message for 10 seconds, then terminate the API
+        # Another approach can be just create a new  aioredis instance inside the API call, itself, then we will not need is_init variable
+        is_init = True
+        # client.subscribe(channel_name)
+        # pubsub = redis_client.pubsub()
+        await pubsub.subscribe(channel_name)
+        lc = 1
 
         while True:
             # If client closes connection, stop sending events
             if await request.is_disconnected():
                 break
-
+            print('loop counter', lc)
+            lc += 1
             # Checks for new messages and return them to client if any
-            message = pubsub.get_message()
+            message = await pubsub.get_message(timeout=NON_RESPONSE_WAIT_TIME)
             if message and message['type'] == 'message':
+                print('msg ', message)
                 val = message['data'].decode('utf-8')
                 print(val)
-                last_event_time = datetime.now()
                 yield val
+            else:
+                if is_init:
+                    is_init = False
+                else:
+                    break
 
-            curr_time = datetime.now()
-
-            time_diff_in_ms = (curr_time - last_event_time).total_seconds()
-            if time_diff_in_ms > NON_RESPONSE_WAIT_TIME:
-                break
-
-            # Prefer Some delay otherwise this while loop will be so expensive
-            await asyncio.sleep(STREAM_DELAY)
 
 
 
